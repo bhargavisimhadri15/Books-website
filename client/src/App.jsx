@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
+import Navbar from "./components/Navbar.jsx";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -70,41 +71,6 @@ function App() {
 function Protected({ children }) {
   const token = localStorage.getItem("authorToken");
   return token ? children : <Navigate to="/admin/login" />;
-}
-
-function Navbar() {
-  const navigate = useNavigate();
-  const token = localStorage.getItem("authorToken");
-
-  const logout = () => {
-    localStorage.removeItem("authorToken");
-    navigate("/");
-  };
-
-  return (
-    <nav className="navbar">
-      <Link to="/" className="logo">
-        Bhargavi Books
-      </Link>
-
-      <div className="nav-links">
-        <a href="/#books">Books</a>
-        <a href="/#about">About</a>
-        <a href="/#contact">Contact</a>
-
-        {token ? (
-          <>
-            <Link to="/admin">Dashboard</Link>
-            <button onClick={logout} className="nav-btn">
-              Logout
-            </button>
-          </>
-        ) : (
-          <Link to="/admin/login">Author Login</Link>
-        )}
-      </div>
-    </nav>
-  );
 }
 
 function Home() {

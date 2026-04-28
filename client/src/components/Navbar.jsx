@@ -3,11 +3,11 @@ import { useState } from "react";
 
 export default function Navbar() {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem("authorUser") || "null");
+  const token = localStorage.getItem("authorToken");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const logout = () => {
-    localStorage.removeItem("authorUser");
+    localStorage.removeItem("authorToken");
     navigate("/");
     setIsMenuOpen(false);
   };
@@ -44,15 +44,17 @@ export default function Navbar() {
         <a href="/#contact" onClick={closeMenu}>
           Contact
         </a>
-        {user?.token ? (
+        {token ? (
           <>
             <Link to="/admin" onClick={closeMenu}>
               Dashboard
             </Link>
-            <button onClick={logout} className="link-btn">Logout</button>
+            <button onClick={logout} className="nav-btn">
+              Logout
+            </button>
           </>
         ) : (
-          <Link to="/login" onClick={closeMenu}>
+          <Link to="/admin/login" onClick={closeMenu}>
             Author Login
           </Link>
         )}
