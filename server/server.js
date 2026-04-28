@@ -81,6 +81,16 @@ mongoose
   .catch((err) => console.log(err));
 
 // ================= MODELS =================
+const reviewSchema = new mongoose.Schema(
+  {
+    name: { type: String, default: "Anonymous" },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+  },
+  { _id: false }
+);
+
 const bookSchema = new mongoose.Schema({
   title: String,
   subtitle: String,
@@ -88,7 +98,8 @@ const bookSchema = new mongoose.Schema({
   description: String,
   image: String,
   flipkartLink: String,
-  amazonLink: String
+  amazonLink: String,
+  reviews: { type: [reviewSchema], default: [] }
 });
 
 const Book = mongoose.model("Book", bookSchema);
@@ -100,6 +111,17 @@ const userSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model("User", userSchema);
+
+const getReviewStats = (reviews) => {
+  const reviewCount = reviews.length;
+  if (reviewCount === 0) return { reviewCount: 0, averageRating: 0 };
+
+  const sum = reviews.reduce((acc, r) => acc + (Number(r.rating) || 0), 0);
+  return {
+    reviewCount,
+    averageRating: Math.round((sum / reviewCount) * 10) / 10
+  };
+};
 
 // ================= AUTH =================
 app.post("/api/auth/register", async (req, res) => {
@@ -148,12 +170,19 @@ const protect = (req, res, next) => {
 // ================= BOOK ROUTES =================
 app.get("/api/books", async (req, res) => {
   const books = await Book.find();
-  res.json(books);
+  res.json(
+    books.map((book) => {
+      const bookObj = book.toObject();
+      return { ...bookObj, ...getReviewStats(bookObj.reviews || []) };
+    })
+  );
 });
 
 app.get("/api/books/:id", async (req, res) => {
   const book = await Book.findById(req.params.id);
-  res.json(book);
+  if (!book) return res.status(404).json({ message: "Book not found" });
+  const bookObj = book.toObject();
+  res.json({ ...bookObj, ...getReviewStats(bookObj.reviews || []) });
 });
 
 app.post("/api/books", protect, upload.single("image"), async (req, res) => {
@@ -186,6 +215,42 @@ app.put("/api/books/:id", protect, upload.single("image"), async (req, res) => {
 app.delete("/api/books/:id", protect, async (req, res) => {
   await Book.findByIdAndDelete(req.params.id);
   res.json({ message: "Deleted" });
+});
+
+// ================= REVIEWS =================
+app.post("/api/books/:id/reviews", async (req, res) => {
+  try {
+    const { name, rating, comment } = req.body || {};
+
+    const parsedRating = Number(rating);
+    if (!Number.isFinite(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+      return res.status(400).json({ message: "Rating must be between 1 and 5" });
+    }
+
+    if (!comment || !String(comment).trim()) {
+      return res.status(400).json({ message: "Comment is required" });
+    }
+
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ message: "Book not found" });
+
+    book.reviews.push({
+      name: String(name || "Anonymous").trim() || "Anonymous",
+      rating: parsedRating,
+      comment: String(comment).trim()
+    });
+
+    await book.save();
+
+    const stats = getReviewStats(book.reviews);
+    res.status(201).json({
+      message: "Review added",
+      reviews: book.reviews,
+      ...stats
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to add review" });
+  }
 });
 
 // ================= SERVER =================

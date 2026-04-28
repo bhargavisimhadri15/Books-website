@@ -25,6 +25,46 @@ API.interceptors.request.use((req) => {
   return req;
 });
 
+function StarDisplay({ value = 0 }) {
+  const filledCount = Math.round(Math.max(0, Math.min(5, Number(value) || 0)));
+  return (
+    <span className="stars" aria-label={`${filledCount} out of 5 stars`}>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <span
+          // eslint-disable-next-line react/no-array-index-key
+          key={index}
+          className={`star ${index < filledCount ? "filled" : ""}`}
+        >
+          ★
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function StarInput({ value, onChange }) {
+  return (
+    <div className="star-input" role="radiogroup" aria-label="Star rating">
+      {Array.from({ length: 5 }).map((_, index) => {
+        const starValue = index + 1;
+        return (
+          <button
+            key={starValue}
+            type="button"
+            className={`star-btn ${starValue <= value ? "filled" : ""}`}
+            onClick={() => onChange(starValue)}
+            aria-label={`${starValue} star${starValue === 1 ? "" : "s"}`}
+            aria-checked={starValue === value}
+            role="radio"
+          >
+            ★
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function App() {
   return (
     <>
@@ -131,6 +171,16 @@ function Home() {
                 <div className="book-content">
                   <h3>{book.title}</h3>
                   <p className="subtitle">{book.subtitle}</p>
+
+                  <div className="rating-row">
+                    <StarDisplay value={book.averageRating || 0} />
+                    <span className="rating-text">
+                      {book.reviewCount
+                        ? `${book.averageRating?.toFixed?.(1) ?? book.averageRating} (${book.reviewCount})`
+                        : "No ratings"}
+                    </span>
+                  </div>
+
                   <p className="desc">{book.description}</p>
                   <h4>₹{book.price}</h4>
 
@@ -203,12 +253,42 @@ function Home() {
 function BookDetails() {
   const { id } = useParams();
   const [book, setBook] = useState(null);
+  const [reviewForm, setReviewForm] = useState({
+    name: "",
+    rating: 5,
+    comment: ""
+  });
+  const [reviewStatus, setReviewStatus] = useState("");
 
   useEffect(() => {
     API.get(`/books/${id}`)
       .then((res) => setBook(res.data))
       .catch((err) => console.log(err));
   }, [id]);
+
+  const submitReview = async (e) => {
+    e.preventDefault();
+    setReviewStatus("");
+
+    try {
+      const res = await API.post(`/books/${id}/reviews`, reviewForm);
+      setBook((prev) =>
+        prev
+          ? {
+              ...prev,
+              reviews: res.data.reviews,
+              averageRating: res.data.averageRating,
+              reviewCount: res.data.reviewCount
+            }
+          : prev
+      );
+
+      setReviewForm((prev) => ({ ...prev, comment: "" }));
+      setReviewStatus("Thanks! Your review was submitted.");
+    } catch (err) {
+      setReviewStatus(err.response?.data?.message || "Review submit failed");
+    }
+  };
 
   if (!book) return <p className="loading">Loading...</p>;
 
@@ -226,6 +306,16 @@ function BookDetails() {
         <p className="tag">Book Details</p>
         <h1>{book.title}</h1>
         <h3>{book.subtitle}</h3>
+
+        <div className="rating-row">
+          <StarDisplay value={book.averageRating || 0} />
+          <span className="rating-text">
+            {book.reviewCount
+              ? `${book.averageRating?.toFixed?.(1) ?? book.averageRating} (${book.reviewCount})`
+              : "No ratings yet"}
+          </span>
+        </div>
+
         <p>{book.description}</p>
         <h2>₹{book.price}</h2>
 
@@ -250,6 +340,58 @@ function BookDetails() {
             Buy on Amazon
           </a>
         )}
+
+        <div className="reviews">
+          <h2 className="reviews-title">Reviews</h2>
+
+          <form className="review-form" onSubmit={submitReview}>
+            <input
+              placeholder="Your name (optional)"
+              value={reviewForm.name}
+              onChange={(e) =>
+                setReviewForm((prev) => ({ ...prev, name: e.target.value }))
+              }
+            />
+
+            <StarInput
+              value={reviewForm.rating}
+              onChange={(rating) =>
+                setReviewForm((prev) => ({ ...prev, rating }))
+              }
+            />
+
+            <textarea
+              placeholder="Write your review..."
+              value={reviewForm.comment}
+              onChange={(e) =>
+                setReviewForm((prev) => ({ ...prev, comment: e.target.value }))
+              }
+              required
+            />
+
+            <button type="submit">Submit Review</button>
+            {reviewStatus && <p className="status">{reviewStatus}</p>}
+          </form>
+
+          {book.reviews?.length ? (
+            <div className="review-list">
+              {[...book.reviews].reverse().map((review, idx) => (
+                <div
+                  className="review-card"
+                  key={`${review.createdAt || ""}-${idx}`}
+                >
+                  <div className="review-head">
+                    <strong>{review.name || "Anonymous"}</strong>
+                    <StarDisplay value={review.rating || 0} />
+                  </div>
+                  <p className="review-comment">{review.comment}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="review-empty">Be the first to review this book.</p>
+          )}
+        </div>
       </div>
     </section>
   );
