@@ -40,7 +40,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+// Express 5 + path-to-regexp v6 does not accept "*" as a path pattern.
+// Use a RegExp to cover all OPTIONS preflight requests.
+app.options(/.*/, cors(corsOptions));
 
 app.use(express.json());
 
