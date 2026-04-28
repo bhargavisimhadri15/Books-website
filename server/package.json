@@ -1,0 +1,23 @@
+{
+  "name": "author-website-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.15.2",
+    "bcryptjs": "^3.0.3",
+    "cors": "latest",
+    "dotenv": "^17.4.2",
+    "express": "latest",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "latest",
+    "multer": "latest"
+  },
+  "devDependencies": {
+    "nodemon": "latest"
+  }
+}

@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+
+# Env files
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Uploads (local dev only)
+server/uploads
+
+# Vercel
+.vercel
