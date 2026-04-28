@@ -20,21 +20,27 @@ const allowedOrigins = (process.env.CLIENT_URLS || process.env.CLIENT_URL || "")
   .map((value) => normalizeOrigin(value.trim()))
   .filter(Boolean);
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow non-browser requests (no Origin header), like curl/Postman.
-      if (!origin) return callback(null, true);
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser requests (no Origin header), like curl/Postman.
+    if (!origin) return callback(null, true);
 
-      if (allowedOrigins.length === 0) return callback(null, true);
+    // If no allow-list configured, allow all origins.
+    if (allowedOrigins.length === 0) return callback(null, true);
 
-      const normalizedOrigin = normalizeOrigin(origin);
-      if (allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
 
-      return callback(new Error("CORS: Origin not allowed"));
-    }
-  })
-);
+    return callback(new Error("CORS: Origin not allowed"));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 app.use(express.json());
 
