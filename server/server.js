@@ -13,7 +13,17 @@ dotenv.config();
 const app = express();
 
 // ✅ CORS FIX (VERY IMPORTANT)
-const normalizeOrigin = (value) => value.replace(/\/$/, "");
+const normalizeOrigin = (value) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const withoutSlash = trimmed.replace(/\/$/, "");
+
+  // If user sets just the domain (common in dashboards), assume https.
+  if (!/^https?:\/\//i.test(withoutSlash)) return `https://${withoutSlash}`;
+
+  return withoutSlash;
+};
 
 const allowedOrigins = (process.env.CLIENT_URLS || process.env.CLIENT_URL || "")
   .split(",")
@@ -31,7 +41,9 @@ const corsOptions = {
     const normalizedOrigin = normalizeOrigin(origin);
     if (allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
 
-    return callback(new Error("CORS: Origin not allowed"));
+    // Don't throw (which becomes a 500 and breaks preflight); just disallow.
+    // The browser will block the request due to missing CORS headers.
+    return callback(null, false);
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
