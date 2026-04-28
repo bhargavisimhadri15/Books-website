@@ -274,7 +274,10 @@ function Login() {
     } catch (err) {
       console.log("Login error:", err);
       console.log("API_BASE_URL:", API_BASE_URL);
-      alert(err.response?.data?.message || "Login failed ❌");
+      const message =
+        err?.response?.data?.message ||
+        `Login failed (${err?.message || "unknown error"}). API: ${API_BASE_URL}`;
+      alert(message);
     }
   };
 
