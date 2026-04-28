@@ -272,6 +272,8 @@ function Login() {
       alert("Login successful ✅");
       navigate("/admin");
     } catch (err) {
+      console.log("Login error:", err);
+      console.log("API_BASE_URL:", API_BASE_URL);
       alert(err.response?.data?.message || "Login failed ❌");
     }
   };

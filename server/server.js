@@ -12,9 +12,12 @@ dotenv.config();
 
 const app = express();
 
+// ✅ CORS FIX (VERY IMPORTANT)
+const normalizeOrigin = (value) => value.replace(/\/$/, "");
+
 const allowedOrigins = (process.env.CLIENT_URLS || process.env.CLIENT_URL || "")
   .split(",")
-  .map((v) => v.trim())
+  .map((value) => normalizeOrigin(value.trim()))
   .filter(Boolean);
 
 app.use(
@@ -25,245 +28,149 @@ app.use(
 
       if (allowedOrigins.length === 0) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (allowedOrigins.includes(normalizedOrigin)) return callback(null, true);
 
       return callback(new Error("CORS: Origin not allowed"));
     }
   })
 );
+
 app.use(express.json());
 
+// ================= FILE UPLOAD =================
 const uploadDir = "uploads";
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
 app.use("/uploads", express.static("uploads"));
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected ✅"))
-  .catch((err) => console.log("MongoDB connection error:", err.message));
-
-const bookSchema = new mongoose.Schema(
-  {
-    title: { type: String, required: true },
-    subtitle: String,
-    price: { type: Number, required: true },
-    description: String,
-    image: String,
-    flipkartLink: String,
-    amazonLink: String
-  },
-  { timestamps: true }
-);
-
-const Book = mongoose.model("Book", bookSchema);
-
-const userSchema = new mongoose.Schema(
-  {
-    name: String,
-    email: { type: String, unique: true },
-    password: String,
-    role: { type: String, default: "author" }
-  },
-  { timestamps: true }
-);
-
-const User = mongoose.model("User", userSchema);
-
-const messageSchema = new mongoose.Schema(
-  {
-    name: String,
-    email: String,
-    message: String
-  },
-  { timestamps: true }
-);
-
-const Message = mongoose.model("Message", messageSchema);
-
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, "uploads"),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
-    cb(null, Date.now() + "-" + Math.round(Math.random() * 1e9) + ext);
+    cb(null, Date.now() + ext);
   }
 });
 
 const upload = multer({ storage });
 
-const getBaseUrl = (req) => `${req.protocol}://${req.get("host")}`;
+// ================= DB =================
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB Connected ✅"))
+  .catch((err) => console.log(err));
 
-const protect = (req, res, next) => {
-  const authHeader = req.headers.authorization;
+// ================= MODELS =================
+const bookSchema = new mongoose.Schema({
+  title: String,
+  subtitle: String,
+  price: Number,
+  description: String,
+  image: String,
+  flipkartLink: String,
+  amazonLink: String
+});
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token. Author login required." });
+const Book = mongoose.model("Book", bookSchema);
+
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: String,
+  password: String
+});
+
+const User = mongoose.model("User", userSchema);
+
+// ================= AUTH =================
+app.post("/api/auth/register", async (req, res) => {
+  const { name, email, password } = req.body;
+
+  const exists = await User.findOne({ email });
+  if (exists) {
+    return res.status(400).json({ message: "User already exists" });
   }
 
+  const hashed = await bcrypt.hash(password, 10);
+
+  await User.create({ name, email, password: hashed });
+
+  res.json({ message: "Registered ✅" });
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) return res.status(401).json({ message: "Invalid email" });
+
+  const match = await bcrypt.compare(password, user.password);
+  if (!match) return res.status(401).json({ message: "Invalid password" });
+
+  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+
+  res.json({ token });
+});
+
+// ================= MIDDLEWARE =================
+const protect = (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+
+  if (!token) return res.status(401).json({ message: "No token" });
+
   try {
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    jwt.verify(token, process.env.JWT_SECRET);
     next();
   } catch {
     res.status(401).json({ message: "Invalid token" });
   }
 };
 
-const authorOnly = (req, res, next) => {
-  if (req.user.role !== "author") {
-    return res.status(403).json({ message: "Access denied. Author only." });
-  }
-  next();
-};
-
-app.get("/", (req, res) => {
-  res.send("Author Book API Running 🚀");
-});
-
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-
-    const exists = await User.findOne({ email });
-    if (exists) return res.status(400).json({ message: "Author already exists" });
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    await User.create({
-      name,
-      email,
-      password: hashedPassword,
-      role: "author"
-    });
-
-    res.json({ message: "Author account created ✅" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ message: "Invalid email" });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ message: "Invalid password" });
-
-    const token = jwt.sign(
-      { id: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-
-    res.json({
-      token,
-      user: { name: user.name, email: user.email, role: user.role }
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
+// ================= BOOK ROUTES =================
 app.get("/api/books", async (req, res) => {
-  const books = await Book.find().sort({ createdAt: -1 });
+  const books = await Book.find();
   res.json(books);
 });
 
 app.get("/api/books/:id", async (req, res) => {
   const book = await Book.findById(req.params.id);
-  if (!book) return res.status(404).json({ message: "Book not found" });
   res.json(book);
 });
 
-app.post(
-  "/api/books",
-  protect,
-  authorOnly,
-  upload.single("image"),
-  async (req, res) => {
-    try {
-      const image = req.file
-        ? `${getBaseUrl(req)}/uploads/${req.file.filename}`
-        : req.body.image;
+app.post("/api/books", protect, upload.single("image"), async (req, res) => {
+  const image = req.file
+    ? `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
+    : "";
 
-      const book = await Book.create({
-        title: req.body.title,
-        subtitle: req.body.subtitle,
-        price: req.body.price,
-        description: req.body.description,
-        image,
-        flipkartLink: req.body.flipkartLink,
-        amazonLink: req.body.amazonLink
-      });
+  const book = await Book.create({
+    ...req.body,
+    image
+  });
 
-      res.json({ message: "Book added ✅", book });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  }
-);
-
-app.put(
-  "/api/books/:id",
-  protect,
-  authorOnly,
-  upload.single("image"),
-  async (req, res) => {
-    try {
-      const updateData = {
-        title: req.body.title,
-        subtitle: req.body.subtitle,
-        price: req.body.price,
-        description: req.body.description,
-        flipkartLink: req.body.flipkartLink,
-        amazonLink: req.body.amazonLink
-      };
-
-      if (req.file) {
-        updateData.image = `${getBaseUrl(req)}/uploads/${req.file.filename}`;
-      }
-
-      const book = await Book.findByIdAndUpdate(req.params.id, updateData, {
-        new: true
-      });
-
-      res.json({ message: "Book updated ✅", book });
-    } catch (err) {
-      res.status(500).json({ message: err.message });
-    }
-  }
-);
-
-app.delete("/api/books/:id", protect, authorOnly, async (req, res) => {
-  try {
-    await Book.findByIdAndDelete(req.params.id);
-    res.json({ message: "Book deleted ✅" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  res.json(book);
 });
 
-app.post("/api/contact", async (req, res) => {
-  try {
-    await Message.create(req.body);
-    res.json({ message: "Message sent successfully ✅" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+app.put("/api/books/:id", protect, upload.single("image"), async (req, res) => {
+  let updateData = { ...req.body };
+
+  if (req.file) {
+    updateData.image = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
   }
+
+  const book = await Book.findByIdAndUpdate(req.params.id, updateData, {
+    new: true
+  });
+
+  res.json(book);
 });
 
-app.get("/api/messages", protect, authorOnly, async (req, res) => {
-  const messages = await Message.find().sort({ createdAt: -1 });
-  res.json(messages);
+app.delete("/api/books/:id", protect, async (req, res) => {
+  await Book.findByIdAndDelete(req.params.id);
+  res.json({ message: "Deleted" });
 });
 
-app.delete("/api/messages/:id", protect, authorOnly, async (req, res) => {
-  await Message.findByIdAndDelete(req.params.id);
-  res.json({ message: "Message deleted ✅" });
+// ================= SERVER =================
+app.get("/", (req, res) => {
+  res.send("Author Book API Running 🚀");
 });
 
 const PORT = process.env.PORT || 5000;
