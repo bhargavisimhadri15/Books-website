@@ -64,15 +64,11 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
 app.use("/uploads", express.static("uploads"));
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads"),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
-  }
-});
-
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
+
+const toAbsoluteUrl = (req, pathname) =>
+  `${req.protocol}://${req.get("host")}${pathname.startsWith("/") ? "" : "/"}${pathname}`;
 
 // ================= DB =================
 mongoose
@@ -97,6 +93,9 @@ const bookSchema = new mongoose.Schema({
   price: Number,
   description: String,
   image: String,
+  imageStored: { type: Boolean, default: false },
+  imageData: { type: Buffer, select: false },
+  imageContentType: { type: String, select: false },
   flipkartLink: String,
   amazonLink: String,
   reviews: { type: [reviewSchema], default: [] }
@@ -121,6 +120,17 @@ const getReviewStats = (reviews) => {
     reviewCount,
     averageRating: Math.round((sum / reviewCount) * 10) / 10
   };
+};
+
+const toBookResponse = (req, bookDoc) => {
+  const bookObj = bookDoc.toObject();
+  const response = { ...bookObj, ...getReviewStats(bookObj.reviews || []) };
+
+  if (bookObj.imageStored && bookObj._id) {
+    response.image = toAbsoluteUrl(req, `/api/books/${bookObj._id}/image`);
+  }
+
+  return response;
 };
 
 // ================= AUTH =================
@@ -170,46 +180,89 @@ const protect = (req, res, next) => {
 // ================= BOOK ROUTES =================
 app.get("/api/books", async (req, res) => {
   const books = await Book.find();
-  res.json(
-    books.map((book) => {
-      const bookObj = book.toObject();
-      return { ...bookObj, ...getReviewStats(bookObj.reviews || []) };
-    })
-  );
+  res.json(books.map((book) => toBookResponse(req, book)));
 });
 
 app.get("/api/books/:id", async (req, res) => {
   const book = await Book.findById(req.params.id);
   if (!book) return res.status(404).json({ message: "Book not found" });
-  const bookObj = book.toObject();
-  res.json({ ...bookObj, ...getReviewStats(bookObj.reviews || []) });
+  res.json(toBookResponse(req, book));
+});
+
+app.get("/api/books/:id/image", async (req, res) => {
+  try {
+    const book = await Book.findById(req.params.id).select(
+      "+imageData +imageContentType"
+    );
+    if (!book) return res.status(404).send("Not found");
+
+    if (!book.imageStored || !book.imageData) {
+      return res.status(404).send("No image");
+    }
+
+    res.setHeader(
+      "Content-Type",
+      book.imageContentType || "application/octet-stream"
+    );
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.send(book.imageData);
+  } catch {
+    res.status(404).send("Not found");
+  }
 });
 
 app.post("/api/books", protect, upload.single("image"), async (req, res) => {
-  const image = req.file
-    ? `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`
-    : "";
+  try {
+    const image = "";
 
-  const book = await Book.create({
-    ...req.body,
-    image
-  });
+    let imageData;
+    let imageContentType;
+    let imageStored = false;
 
-  res.json(book);
+    if (req.file) {
+      imageData = req.file.buffer;
+      imageContentType = req.file.mimetype || "application/octet-stream";
+      imageStored = true;
+    }
+
+    const book = await Book.create({
+      ...req.body,
+      image,
+      imageStored,
+      ...(imageStored ? { imageData, imageContentType } : {})
+    });
+
+    res.json(toBookResponse(req, book));
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to create book" });
+  }
 });
 
 app.put("/api/books/:id", protect, upload.single("image"), async (req, res) => {
-  let updateData = { ...req.body };
+  try {
+    let updateData = { ...req.body };
 
-  if (req.file) {
-    updateData.image = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+    if (req.file) {
+      updateData.image = "";
+
+      const imageData = req.file.buffer;
+      const imageContentType = req.file.mimetype || "application/octet-stream";
+
+      updateData.imageStored = true;
+      updateData.imageData = imageData;
+      updateData.imageContentType = imageContentType;
+    }
+
+    const book = await Book.findByIdAndUpdate(req.params.id, updateData, {
+      new: true
+    });
+
+    if (!book) return res.status(404).json({ message: "Book not found" });
+
+    res.json(toBookResponse(req, book));
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Update failed" });
   }
-
-  const book = await Book.findByIdAndUpdate(req.params.id, updateData, {
-    new: true
-  });
-
-  res.json(book);
 });
 
 app.delete("/api/books/:id", protect, async (req, res) => {
